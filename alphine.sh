@@ -7,7 +7,7 @@ echo "=== Alpine Linux VLESS-REALITY 专属安装脚本 ==="
 apk update
 apk add curl jq openssl unzip
 
-# 2. 安装 Xray 核心 (解压官方二进制文件)
+# 2. 安装 Xray 核心
 XRAY_VER=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | jq -r .tag_name)
 echo "正在下载 Xray 核心: ${XRAY_VER}..."
 curl -L -o /tmp/xray.zip "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VER}/Xray-linux-64.zip"
@@ -50,11 +50,15 @@ if [ -z "$PUBLIC_PORT" ]; then
   PUBLIC_PORT=$LISTEN_PORT
 fi
 
-# 4. 生成 Xray 密钥与参数 (更稳健的提取逻辑)
+# 4. 生成 Xray 密钥与参数 (兼容 BusyBox sh 拆分提取)
 UUID=$(/usr/local/bin/xray uuid)
-KEYS=$(/usr/local/bin/xray x25519)
-PRIVATE_KEY=$(echo "$KEYS" | awk -F': ' '/Private key/ {print $2}' | tr -d ' \r')
-PUBLIC_KEY=$(echo "$KEYS" | awk -F': ' '/Public key/ {print $2}' | tr -d ' \r')
+
+# 临时存入变量文件确保提取百分百正确
+/usr/local/bin/xray x25519 > /tmp/x25519.tmp
+PRIVATE_KEY=$(grep -i "Private key:" /tmp/x25519.tmp | cut -d: -f2 | tr -d ' \r\n')
+PUBLIC_KEY=$(grep -i "Public key:" /tmp/x25519.tmp | cut -d: -f2 | tr -d ' \r\n')
+rm -f /tmp/x25519.tmp
+
 SHORT_ID=$(openssl rand -hex 4)
 
 # 5. 生成配置文件
@@ -103,7 +107,7 @@ cat << CONFIG > /etc/xray/config.json
 }
 CONFIG
 
-# 6. 配置 OpenRC 服务管理 (Alpine 专属)
+# 6. 配置 OpenRC 服务管理
 cat << 'SERVICE' > /etc/init.d/xray
 #!/sbin/openrc-run
 
