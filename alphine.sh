@@ -3,7 +3,7 @@ set -e
 
 echo "=== Alpine Linux VLESS-REALITY 专属安装脚本 ==="
 
-# 1. 安装 Alpine 基础依赖工具（纯净无 qrencode）
+# 1. 安装 Alpine 基础依赖工具
 apk update
 apk add curl jq openssl unzip
 
@@ -50,11 +50,11 @@ if [ -z "$PUBLIC_PORT" ]; then
   PUBLIC_PORT=$LISTEN_PORT
 fi
 
-# 4. 生成 Xray 密钥与参数
+# 4. 生成 Xray 密钥与参数 (更稳健的提取逻辑)
 UUID=$(/usr/local/bin/xray uuid)
 KEYS=$(/usr/local/bin/xray x25519)
-PRIVATE_KEY=$(echo "$KEYS" | grep "Private key:" | awk '{print $3}')
-PUBLIC_KEY=$(echo "$KEYS" | grep "Public key:" | awk '{print $3}')
+PRIVATE_KEY=$(echo "$KEYS" | awk -F': ' '/Private key/ {print $2}' | tr -d ' \r')
+PUBLIC_KEY=$(echo "$KEYS" | awk -F': ' '/Public key/ {print $2}' | tr -d ' \r')
 SHORT_ID=$(openssl rand -hex 4)
 
 # 5. 生成配置文件
@@ -124,7 +124,7 @@ chmod +x /etc/init.d/xray
 rc-update add xray default
 rc-service xray restart
 
-# 7. 获取公网 IP 并生成节点链接
+# 7. 获取公网 IP 并生成标准节点链接
 PUBLIC_IP=$(curl -s https://api.ipify.org || curl -s https://ipv4.icanhazip.com)
 RAW_URL="vless://${UUID}@${PUBLIC_IP}:${PUBLIC_PORT}?type=tcp&security=reality&encryption=none&pbk=${PUBLIC_KEY}&fp=chrome&sni=${SNI}&sid=${SHORT_ID}&flow=xtls-rprx-vision#Alpine-REALITY"
 
