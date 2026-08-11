@@ -3,9 +3,9 @@ set -e
 
 echo "=== Alpine Linux VLESS-REALITY 专属安装脚本 ==="
 
-# 1. 安装 Alpine 依赖工具
+# 1. 安装 Alpine 基础依赖工具（纯净无 qrencode）
 apk update
-apk add curl jq openssl qrencode
+apk add curl jq openssl unzip
 
 # 2. 安装 Xray 核心 (解压官方二进制文件)
 XRAY_VER=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | jq -r .tag_name)
@@ -50,7 +50,7 @@ if [ -z "$PUBLIC_PORT" ]; then
   PUBLIC_PORT=$LISTEN_PORT
 fi
 
-# 4. 生成 Xray 密钥
+# 4. 生成 Xray 密钥与参数
 UUID=$(/usr/local/bin/xray uuid)
 KEYS=$(/usr/local/bin/xray x25519)
 PRIVATE_KEY=$(echo "$KEYS" | grep "Private key:" | awk '{print $3}')
@@ -124,7 +124,7 @@ chmod +x /etc/init.d/xray
 rc-update add xray default
 rc-service xray restart
 
-# 7. 获取公网 IP 并打印导入链接与二维码
+# 7. 获取公网 IP 并生成节点链接
 PUBLIC_IP=$(curl -s https://api.ipify.org || curl -s https://ipv4.icanhazip.com)
 RAW_URL="vless://${UUID}@${PUBLIC_IP}:${PUBLIC_PORT}?type=tcp&security=reality&encryption=none&pbk=${PUBLIC_KEY}&fp=chrome&sni=${SNI}&sid=${SHORT_ID}&flow=xtls-rprx-vision#Alpine-REALITY"
 
@@ -136,8 +136,4 @@ echo ""
 echo "👉 复制导入客户端链接："
 echo "${RAW_URL}"
 echo ""
-echo "=================================================="
-echo "👉 手机客户端扫码直接添加："
-echo ""
-qrencode -t ansiutf8 "${RAW_URL}"
 echo "=================================================="
