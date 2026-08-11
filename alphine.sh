@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-echo "=== Alpine Linux VLESS-REALITY 专属安装脚本 ==="
+echo "=== Alpine Linux - Cloudflare CDN + Origin Rules 专属脚本 ==="
 
 # 1. 停止老服务与清理旧配置
 echo "--> 检查并清理旧服务与配置..."
@@ -10,6 +10,7 @@ if [ -f /etc/init.d/xray ]; then
 fi
 pkill -9 xray 2>/dev/null || true
 rm -f /etc/xray/config.json
+rm -f /etc/xray/server.crt /etc/xray/server.key
 
 # 2. 安装/更新 Alpine 基础依赖工具
 apk update
@@ -17,7 +18,7 @@ apk add curl jq openssl unzip
 
 # 3. 下载/更新 Xray 核心
 XRAY_VER=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | jq -r .tag_name)
-echo "正在下载 Xray 核心: ${XRAY_VER}..."
+echo "--> 正在下载 Xray 核心: ${XRAY_VER}..."
 curl -L -o /tmp/xray.zip "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VER}/Xray-linux-64.zip"
 
 mkdir -p /usr/local/bin /etc/xray
@@ -25,50 +26,39 @@ unzip -o /tmp/xray.zip xray -d /usr/local/bin/
 chmod +x /usr/local/bin/xray
 rm -f /tmp/xray.zip
 
-# 4. 交互输入网络参数 (修复管道一键运行无法输入的 Bug)
+# 4. 交互输入网络参数
 echo ""
-echo "请选择伪装域名 (SNI):"
-echo "1) www.microsoft.com (推荐)"
-echo "2) www.yandex.com"
-printf "请输入选项 [1-2, 默认1]: "
-read DOMAIN_CHOICE < /dev/tty
+printf "1. 请输入你准备托管在 CF 上的翻墙域名 (例如 vless.你的域名.com): "
+read CF_DOMAIN < /dev/tty
+while [ -z "$CF_DOMAIN" ]; do
+  printf "域名不能为空，请重新输入: "
+  read CF_DOMAIN < /dev/tty
+done
 
-case "$DOMAIN_CHOICE" in
-  2)
-    SNI="www.yandex.com"
-    DEST="www.yandex.com:443"
-    ;;
-  *)
-    SNI="www.microsoft.com"
-    DEST="www.microsoft.com:443"
-    ;;
-esac
-
-echo ""
-printf "1. 请输入 VPS 内部监听端口 (例如 10022): "
+printf "2. 请输入 VPS 内部监听端口 (例如 10022): "
 read LISTEN_PORT < /dev/tty
 while [ -z "$LISTEN_PORT" ]; do
   printf "端口不能为空，请重新输入: "
   read LISTEN_PORT < /dev/tty
 done
 
-printf "2. 请输入 NAT 面板分配的外部公网端口 (若与内部端口一致直接回车): "
+printf "3. 请输入 NAT 面板分配的外部公网端口 (如 35462): "
 read PUBLIC_PORT < /dev/tty
-if [ -z "$PUBLIC_PORT" ]; then
-  PUBLIC_PORT=$LISTEN_PORT
-fi
+while [ -z "$PUBLIC_PORT" ]; do
+  printf "端口不能为空，请重新输入: "
+  read PUBLIC_PORT < /dev/tty
+done
 
-# 5. 生成 Xray 密钥与参数 (BusyBox 稳健提取)
+# 5. 生成 Xray 参数与自签证书
 UUID=$(/usr/local/bin/xray uuid)
+WS_PATH="/$(openssl rand -hex 4)"
 
-/usr/local/bin/xray x25519 > /tmp/x25519.tmp
-PRIVATE_KEY=$(grep -i "Private key:" /tmp/x25519.tmp | cut -d: -f2 | tr -d ' \r\n')
-PUBLIC_KEY=$(grep -i "Public key:" /tmp/x25519.tmp | cut -d: -f2 | tr -d ' \r\n')
-rm -f /tmp/x25519.tmp
+echo "--> 正在生成自签 TLS 证书..."
+openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+  -keyout /etc/xray/server.key -out /etc/xray/server.crt \
+  -subj "/CN=${CF_DOMAIN}" 2>/dev/null
 
-SHORT_ID=$(openssl rand -hex 4)
-
-# 6. 生成新配置文件
+# 6. 生成新配置文件 (VLESS-WS-TLS)
 cat << CONFIG > /etc/xray/config.json
 {
   "log": {
@@ -82,26 +72,24 @@ cat << CONFIG > /etc/xray/config.json
       "settings": {
         "clients": [
           {
-            "id": "${UUID}",
-            "flow": "xtls-rprx-vision"
+            "id": "${UUID}"
           }
         ],
         "decryption": "none"
       },
       "streamSettings": {
-        "network": "tcp",
-        "security": "reality",
-        "realitySettings": {
-          "show": false,
-          "dest": "${DEST}",
-          "xver": 0,
-          "serverNames": [
-            "${SNI}"
-          ],
-          "privateKey": "${PRIVATE_KEY}",
-          "shortIds": [
-            "${SHORT_ID}"
+        "network": "ws",
+        "security": "tls",
+        "tlsSettings": {
+          "certificates": [
+            {
+              "certificateFile": "/etc/xray/server.crt",
+              "keyFile": "/etc/xray/server.key"
+            }
           ]
+        },
+        "wsSettings": {
+          "path": "${WS_PATH}"
         }
       }
     }
@@ -135,16 +123,14 @@ chmod +x /etc/init.d/xray
 rc-update add xray default
 rc-service xray restart
 
-# 8. 获取公网 IP 并导出链接
-PUBLIC_IP=$(curl -s https://api.ipify.org || curl -s https://ipv4.icanhazip.com)
-RAW_URL="vless://${UUID}@${PUBLIC_IP}:${PUBLIC_PORT}?type=tcp&security=reality&encryption=none&pbk=${PUBLIC_KEY}&fp=chrome&sni=${SNI}&sid=${SHORT_ID}&flow=xtls-rprx-vision#Alpine-REALITY"
+# 8. 导出标准 CDN 链接
+# 注意：生成的链接端口是 443，IP是你的域名，因为流量首先交给 Cloudflare
+RAW_URL="vless://${UUID}@${CF_DOMAIN}:443?encryption=none&security=tls&type=ws&host=${CF_DOMAIN}&sni=${CF_DOMAIN}&path=${WS_PATH}#CF-CDN-NAT"
 
 echo ""
 echo "=================================================="
-echo "    Alpine Linux VLESS-REALITY 重置/安装成功！"
+echo "    VPS 端 VLESS-WS-TLS 安装成功！"
 echo "=================================================="
-echo ""
-echo "👉 复制导入客户端链接："
+echo "👉 复制导入客户端的链接 (现在还连不上，请完成第二步)："
 echo "${RAW_URL}"
-echo ""
 echo "=================================================="
