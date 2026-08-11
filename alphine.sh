@@ -25,13 +25,13 @@ unzip -o /tmp/xray.zip xray -d /usr/local/bin/
 chmod +x /usr/local/bin/xray
 rm -f /tmp/xray.zip
 
-# 4. 交互输入网络参数
+# 4. 交互输入网络参数 (修复管道一键运行无法输入的 Bug)
 echo ""
 echo "请选择伪装域名 (SNI):"
 echo "1) www.microsoft.com (推荐)"
 echo "2) www.yandex.com"
 printf "请输入选项 [1-2, 默认1]: "
-read DOMAIN_CHOICE
+read DOMAIN_CHOICE < /dev/tty
 
 case "$DOMAIN_CHOICE" in
   2)
@@ -46,14 +46,14 @@ esac
 
 echo ""
 printf "1. 请输入 VPS 内部监听端口 (例如 10022): "
-read LISTEN_PORT
+read LISTEN_PORT < /dev/tty
 while [ -z "$LISTEN_PORT" ]; do
   printf "端口不能为空，请重新输入: "
-  read LISTEN_PORT
+  read LISTEN_PORT < /dev/tty
 done
 
 printf "2. 请输入 NAT 面板分配的外部公网端口 (若与内部端口一致直接回车): "
-read PUBLIC_PORT
+read PUBLIC_PORT < /dev/tty
 if [ -z "$PUBLIC_PORT" ]; then
   PUBLIC_PORT=$LISTEN_PORT
 fi
